@@ -311,7 +311,7 @@ export default function Home() {
               <strong>Research failed:</strong> {error}
               <br />
               <span style={{ fontSize: 12, opacity: 0.8 }}>
-                Make sure ANTHROPIC_API_KEY is set in your Vercel environment variables.
+                Make sure GEMINI_API_KEY is properly set in your environment variables.
               </span>
             </div>
           )}
