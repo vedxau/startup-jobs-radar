@@ -102,11 +102,13 @@ const SYSTEM = `You are an elite startup job research analyst specialising in th
 You have deep knowledge of funded Indian startups, their hiring patterns, and the roles that lead to ₹1Cr+ salaries.
 
 CRITICAL RULES:
-1. Always return ONLY valid raw JSON arrays — no markdown, no backticks, no explanation.
-2. For the "url" field, you MUST ONLY use the career page URL from the provided STARTUP_CAREERS mapping. NEVER invent or guess a job posting URL.
-3. If you don't know the exact career page URL for a company, set "url" to null.
-4. Base your listings on what these companies ACTUALLY hire for based on their known products, team structure, and recent funding rounds.
-5. Be realistic — don't create fantasy roles. Stick to titles these companies genuinely post.`;
+1. Always return ONLY valid JSON. Your response must be a JSON object like: {"jobs": [...]}
+2. The "jobs" array should contain job objects. Do NOT include any text outside the JSON.
+3. For the "url" field, you MUST ONLY use the career page URL from the provided STARTUP_CAREERS mapping. NEVER invent or guess a job posting URL.
+4. If you don't know the exact career page URL for a company, set "url" to null.
+5. Base your listings on what these companies ACTUALLY hire for based on their known products, team structure, and recent funding rounds.
+6. Be realistic — don't create fantasy roles. Stick to titles these companies genuinely post.
+7. Ensure all string values are properly escaped. Do not use special characters that break JSON.`;
 
 /* ─── BUILD PROMPT WITH CAREER URLs ─── */
 const buildPrompt = (roles: string[], stage: string, careersJson: string, scrapedJobs: string) => `
@@ -293,6 +295,58 @@ function fixJobUrls(jobs: any[]): any[] {
   });
 }
 
+/* ─── ROBUST JSON PARSER ─── */
+function sanitizeAndParseJSON(raw: string): any[] {
+  // Extract the JSON array portion
+  let text = raw;
+  const start = text.indexOf("[");
+  const end = text.lastIndexOf("]");
+  if (start === -1 || end === -1) throw new Error("No JSON array found in response");
+  text = text.slice(start, end + 1);
+
+  // Fix common LLM JSON errors
+  text = text
+    // Remove trailing commas before } or ]
+    .replace(/,\s*([\]}])/g, "$1")
+    // Fix Python-style True/False/None
+    .replace(/:\s*True\b/g, ": true")
+    .replace(/:\s*False\b/g, ": false")
+    .replace(/:\s*None\b/g, ": null")
+    // Fix single quotes to double quotes (but not inside strings)
+    .replace(/'/g, '"')
+    // Remove control characters
+    .replace(/[\x00-\x1F\x7F]/g, (ch) => (ch === "\n" || ch === "\r" || ch === "\t" ? " " : ""))
+    // Fix unescaped quotes inside strings: \"text "inner" text\" → \"text 'inner' text\"
+    ;
+
+  // Attempt 1: Direct parse
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Attempt 2: Try to salvage by extracting individual objects
+    const objects: any[] = [];
+    const regex = /\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      try {
+        const obj = JSON.parse(match[0]
+          .replace(/,\s*([\]}])/g, "$1")
+          .replace(/:\s*True\b/g, ": true")
+          .replace(/:\s*False\b/g, ": false")
+          .replace(/:\s*None\b/g, ": null")
+        );
+        if (obj.title && obj.company) {
+          objects.push(obj);
+        }
+      } catch {
+        // Skip malformed objects
+      }
+    }
+    if (objects.length > 0) return objects;
+    throw new Error("Failed to parse AI response as JSON. Please try again.");
+  }
+}
+
 /* ─── MAIN HANDLER ─── */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
@@ -332,8 +386,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           { role: "system", content: SYSTEM },
           { role: "user", content: buildPrompt(roles, stage, careersJson, scrapedJobs) },
         ],
-        temperature: 0.6,
-        max_tokens: 4096,
+        temperature: 0.5,
+        max_tokens: 8000,
+        response_format: { type: "json_object" },
       }),
     });
 
@@ -345,16 +400,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const data = await response.json();
     const text = data.choices?.[0]?.message?.content || "[]";
 
-    let jobs = [];
-    const start = text.indexOf("[");
-    const end = text.lastIndexOf("]");
-    if (start !== -1 && end !== -1) {
-      jobs = JSON.parse(text.slice(start, end + 1));
-    } else {
-      throw new Error("No JSON array found in response");
+    // 4. Robust JSON parsing with error recovery
+    let jobs = sanitizeAndParseJSON(text);
+
+    // Handle if LLM wrapped array in an object like { "jobs": [...] }
+    if (!Array.isArray(jobs) && typeof jobs === "object") {
+      const possibleArray = Object.values(jobs).find(v => Array.isArray(v));
+      if (possibleArray) {
+        jobs = possibleArray as any[];
+      } else {
+        jobs = [jobs];
+      }
     }
 
-    // 4. Post-process: fix/validate all URLs
+    // 5. Post-process: fix/validate all URLs
     jobs = fixJobUrls(jobs);
 
     return res.status(200).json({ jobs, refreshed: new Date().toISOString(), sourceCount: scrapedJobs ? 3 : 0 });
