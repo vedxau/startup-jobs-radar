@@ -19,6 +19,12 @@ type Job = {
   url: string | null;
   role_category: "pm" | "growth" | "sales" | "strategy";
   cold_reach: string | null;
+  search_urls?: {
+    linkedin?: string;
+    wellfound?: string;
+    naukri?: string;
+    instahyre?: string;
+  };
 };
 
 const ROLE_FILTERS = [
@@ -137,6 +143,24 @@ function JobCard({ job, index }: { job: Job; index: number }) {
               </span>
             </div>
           )}
+          {/* Search on multiple job boards */}
+          <div className="expand-search">
+            <span className="expand-label">🔍 Find this job on</span>
+            <div className="search-links">
+              {job.search_urls?.linkedin && (
+                <a href={job.search_urls.linkedin} target="_blank" rel="noreferrer" className="search-chip">LinkedIn</a>
+              )}
+              {job.search_urls?.naukri && (
+                <a href={job.search_urls.naukri} target="_blank" rel="noreferrer" className="search-chip">Naukri</a>
+              )}
+              {job.search_urls?.wellfound && (
+                <a href={job.search_urls.wellfound} target="_blank" rel="noreferrer" className="search-chip">Wellfound</a>
+              )}
+              {job.search_urls?.instahyre && (
+                <a href={job.search_urls.instahyre} target="_blank" rel="noreferrer" className="search-chip">Instahyre</a>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -147,16 +171,16 @@ function JobCard({ job, index }: { job: Job; index: number }) {
         <div className="job-actions">
           {job.url ? (
             <a className="action-btn action-primary" href={job.url} target="_blank" rel="noreferrer">
-              Apply ↗
+              Careers Page ↗
             </a>
           ) : (
             <a
               className="action-btn action-primary"
-              href={`https://wellfound.com/jobs?q=${encodeURIComponent(job.title + " " + job.company)}`}
+              href={job.search_urls?.linkedin || `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(job.title + " " + job.company)}&location=India`}
               target="_blank"
               rel="noreferrer"
             >
-              Wellfound ↗
+              LinkedIn ↗
             </a>
           )}
           {job.cold_reach && (
@@ -915,6 +939,20 @@ export default function Home() {
           font-size: 12px;
         }
         .expand-text { color: rgba(255,255,255,0.4); }
+
+        .expand-search { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .search-links { display: flex; gap: 6px; flex-wrap: wrap; }
+        .search-chip {
+          font-size: 11px; padding: 4px 12px; border-radius: 8px;
+          border: 1px solid rgba(96,165,250,0.2); color: #60A5FA;
+          background: rgba(96,165,250,0.06);
+          font-family: 'JetBrains Mono', monospace;
+          transition: all 0.2s; cursor: pointer; text-decoration: none;
+        }
+        .search-chip:hover {
+          background: rgba(96,165,250,0.12); border-color: rgba(96,165,250,0.35);
+          color: #93BBFD; transform: translateY(-1px);
+        }
 
         /* Footer */
         .job-footer {
