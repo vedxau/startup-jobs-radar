@@ -114,65 +114,41 @@ CRITICAL RULES:
 const buildPrompt = (roles: string[], stage: string, careersJson: string, scrapedJobs: string) => `
 Today is ${new Date().toDateString()}.
 
-AVAILABLE VERIFIED CAREER PAGE URLs (use ONLY these for the "url" field):
+VERIFIED CAREER PAGE URLs (use ONLY these for the "url" field):
 ${careersJson}
 
-${scrapedJobs ? `REAL JOB LISTINGS SCRAPED FROM JOB BOARDS (use these as reference, they are REAL and CURRENT):
+${scrapedJobs ? `SCRAPED REAL JOB DATA (reference only):
 ${scrapedJobs}
-
-Incorporate the above real listings into your response. For scraped jobs, use the provided URL directly.
 ` : ""}
-
-Research REAL, active startup job openings for:
+Research active startup job openings for:
 Roles: ${roles.join(", ")}
-Startup stage: ${stage}
-Location: Remote-friendly OR any Indian city
-Exclusion: NO MNCs (no TCS, Infosys, Wipro, Accenture, IBM, Google, Microsoft, Amazon, Meta)
+Stage: ${stage}
+Location: India or Remote
 
-Focus on these sectors of funded Indian startups:
-- Fintech: Razorpay, Groww, CRED, Slice, Jupiter, Fi Money, Smallcase, Zerodha, Juspay, Cashfree, Open, PhonePe, Paytm, Pine Labs
-- SaaS/B2B: Freshworks, BrowserStack, Postman, Chargebee, LeadSquared, Whatfix, Zoho, Darwinbox, WebEngage, MoEngage, CleverTap, Toplyne, Hasura
-- Edtech: PhysicsWallah, upGrad, Unacademy, Unstop, Classplus, Teachmint, Scaler, Masai School
-- Healthtech: Pristyn Care, Innovaccer, Eka Care, Healthplix, Practo
-- Commerce/D2C: Meesho, Licious, Country Delight, Ninjacart, Zetwerk, Moglix, Udaan, Dukaan, Myntra, Flipkart, Nykaa
-- Deeptech/AI: Sarvam AI, Krutrim, Yellow.ai, Observe.AI, Uniphore
-- Quick Commerce: Zepto, Blinkit, Swiggy
-- Mobility/Logistics: Porter, Shiprocket, Delhivery, Rapido
-- Others: Urban Company, ShareChat, Dream11, MPL, Ola, Curefit
+Sectors: Fintech, SaaS, Edtech, Healthtech, Commerce, AI, Quick Commerce, Logistics
 
-Return a JSON array of 15-20 jobs. Each object must have ALL these fields:
-{
-  "title": "Exact realistic job title this company would actually post",
-  "company": "Company name (must match a company from the list above)",
-  "sector": "Fintech / SaaS / Edtech / etc",
-  "stage": "Seed / Pre-Series A / Series A / Series B / Series C / Series D / Unicorn",
-  "location": "Remote / Bengaluru / Mumbai / Delhi NCR / Hyderabad / Pan-India",
-  "summary": "2 punchy sentences about the role and why it's a career accelerator",
-  "why_now": "1 sentence — reference real funding, product launches, or expansion",
-  "tags": ["skill1", "skill2", "skill3", "skill4"],
-  "salary": "Realistic salary range like ₹18L-₹35L or ₹40L-₹70L based on the role level, or null",
-  "has_esop": true or false,
-  "is_new": true if likely posted recently,
-  "is_hot": true if the company is in a high-growth phase,
-  "posted": "This week / This month / Recently",
-  "source": "Company Careers / Wellfound / LinkedIn / Naukri / Instahyre",
-  "url": "USE ONLY the career page URL from STARTUP_CAREERS mapping above, or the URL from scraped data. NEVER make up a URL. Set null if unsure.",
-  "role_category": "pm" or "growth" or "sales" or "strategy",
-  "cold_reach": "Name of a REAL founder/CXO of this company (e.g., Harshil Mathur for Razorpay, Nithin Kamath for Zerodha) or null",
-  "search_urls": {
-    "linkedin": "https://www.linkedin.com/jobs/search/?keywords={title}+{company}&location=India",
-    "wellfound": "https://wellfound.com/jobs?q={title}+{company}",
-    "naukri": "https://www.naukri.com/{title-slugified}-jobs-in-{company-slugified}"
-  }
-}
+Return {"jobs": [...]} with 12 job objects. Each job object has these flat fields:
+- "title": string (realistic job title)
+- "company": string (from known Indian startups)
+- "sector": string
+- "stage": string (Seed/Series A/Series B/Series C/Unicorn)
+- "location": string
+- "summary": string (2 sentences max)
+- "why_now": string (1 sentence)
+- "tags": ["skill1","skill2","skill3"]
+- "salary": string or null (e.g. "18L-35L")
+- "has_esop": boolean
+- "is_new": boolean
+- "is_hot": boolean
+- "posted": string ("This week"/"This month"/"Recently")
+- "source": string
+- "url": string or null (ONLY from the verified URLs above)
+- "role_category": "pm" or "growth" or "sales" or "strategy"
+- "cold_reach": string or null (real founder name)
 
-IMPORTANT:
-- Spread roles: at least 3 per category (pm, growth, sales, strategy)
-- Mix startup stages
-- Be specific and realistic about titles, salaries, and why_now reasons
-- Reference ACTUAL founders/CXOs in cold_reach
-- The search_urls should be properly formatted with URL-encoded values
+Rules: spread roles evenly across pm/growth/sales/strategy. Use only simple ASCII in strings. No nested objects.
 `;
+
 
 /* ─── SCRAPE FREE JOB APIS ─── */
 async function scrapeRemotive(): Promise<string> {
@@ -386,9 +362,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           { role: "system", content: SYSTEM },
           { role: "user", content: buildPrompt(roles, stage, careersJson, scrapedJobs) },
         ],
-        temperature: 0.5,
-        max_tokens: 8000,
-        response_format: { type: "json_object" },
+        temperature: 0.3,
+        max_tokens: 6000,
       }),
     });
 
@@ -401,15 +376,46 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const text = data.choices?.[0]?.message?.content || "[]";
 
     // 4. Robust JSON parsing with error recovery
-    let jobs = sanitizeAndParseJSON(text);
-
-    // Handle if LLM wrapped array in an object like { "jobs": [...] }
-    if (!Array.isArray(jobs) && typeof jobs === "object") {
-      const possibleArray = Object.values(jobs).find(v => Array.isArray(v));
-      if (possibleArray) {
-        jobs = possibleArray as any[];
+    let jobs: any[];
+    try {
+      const parsed = sanitizeAndParseJSON(text);
+      // Handle if LLM wrapped array in an object like { "jobs": [...] }
+      if (!Array.isArray(parsed) && typeof parsed === "object" && parsed !== null) {
+        const possibleArray = Object.values(parsed).find(v => Array.isArray(v));
+        jobs = possibleArray ? (possibleArray as any[]) : [parsed];
+      } else if (Array.isArray(parsed)) {
+        jobs = parsed;
       } else {
-        jobs = [jobs];
+        jobs = [];
+      }
+    } catch (parseErr) {
+      console.error("JSON parse failed, retrying with simpler prompt...", parseErr);
+      // Retry with a much simpler prompt
+      const retryRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          messages: [
+            { role: "system", content: "Return valid JSON only. No explanation." },
+            { role: "user", content: `Return a JSON object {"jobs":[...]} with 8 Indian startup job listings. Each job: {"title":"...","company":"...","sector":"...","stage":"...","location":"...","summary":"...","why_now":"...","tags":["a","b","c"],"salary":null,"has_esop":false,"is_new":true,"is_hot":false,"posted":"This week","source":"LinkedIn","url":null,"role_category":"pm","cold_reach":null}. Mix roles: pm, growth, sales, strategy. Companies: Razorpay, CRED, Zepto, Meesho, Freshworks, Groww, Swiggy, Porter.` },
+          ],
+          temperature: 0.2,
+          max_tokens: 4000,
+        }),
+      });
+      if (!retryRes.ok) throw new Error("Retry also failed");
+      const retryData = await retryRes.json();
+      const retryText = retryData.choices?.[0]?.message?.content || "[]";
+      const retryParsed = sanitizeAndParseJSON(retryText);
+      if (!Array.isArray(retryParsed) && typeof retryParsed === "object" && retryParsed !== null) {
+        const arr = Object.values(retryParsed).find(v => Array.isArray(v));
+        jobs = arr ? (arr as any[]) : [];
+      } else {
+        jobs = Array.isArray(retryParsed) ? retryParsed : [];
       }
     }
 
