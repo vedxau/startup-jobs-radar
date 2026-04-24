@@ -388,7 +388,7 @@ export default function Home() {
                 <strong>Research failed</strong>
                 <p>{error}</p>
                 <span className="error-hint">
-                  Make sure GEMINI_API_KEY is properly set in your environment variables.
+                  Make sure GROQ_API_KEY is properly set in your environment variables.
                 </span>
               </div>
             </div>
